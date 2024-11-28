@@ -114,7 +114,7 @@ class WandBLogger(cw_logging.AbstractLogger):
             try:
                 self.run = wandb.init(
                     project=self.cw2_config["wandb"]["project"],
-                    entity=self.entity,
+                    # entity=self.entity,
                     group=self.group,
                     job_type=self.job_name[:63],
                     name=self.runname[:63],
