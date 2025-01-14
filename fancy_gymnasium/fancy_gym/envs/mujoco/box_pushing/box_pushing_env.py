@@ -10,7 +10,8 @@ from fancy_gym.envs.mujoco.box_pushing.box_pushing_utils import desired_rod_quat
 
 import mujoco
 
-MAX_EPISODE_STEPS_BOX_PUSHING = 100
+#will be overwritten, if in the yaml there is params -> sampler -> args -> env -> max_episode_steps
+MAX_EPISODE_STEPS_BOX_PUSHING = 125
 
 BOX_POS_BOUND = np.array([[0.3, -0.45, -0.01], [0.6, 0.45, -0.01]])
 
@@ -37,11 +38,24 @@ class BoxPushingEnvBase(MujocoEnv, utils.EzPickle):
         "render_fps": 50
     }
 
-    def __init__(self, frame_skip: int = 10, random_init: bool = False, **kwargs):
+    def __init__(self, frame_skip: int = 10, random_init: bool = False,
+                 episode_max_steps: int = MAX_EPISODE_STEPS_BOX_PUSHING,
+                 init_qpos: list[float]  = [0., 0., 0., -1.5, 0., 1.5, 0., 0., 0., 0.6, 0.45, 0.0, 1., 0., 0., 0.],
+                 init_qvel: list[float] = [0.]*15,
+                 **kwargs):
         utils.EzPickle.__init__(**locals())
         self._steps = 0
-        self.init_qpos_box_pushing = np.array([0., 0., 0., -1.5, 0., 1.5, 0., 0., 0., 0.6, 0.45, 0.0, 1., 0., 0., 0.])
-        self.init_qvel_box_pushing = np.zeros(15)
+
+        #sadly this is used in other files aswell... so change global in function
+        global MAX_EPISODE_STEPS_BOX_PUSHING
+        self._max_steps = episode_max_steps if episode_max_steps is not None else MAX_EPISODE_STEPS_BOX_PUSHING
+        MAX_EPISODE_STEPS_BOX_PUSHING = self._max_steps
+        #self.spec.max_episode_steps  = self._max_steps
+        self._max_episode_steps  =self._max_steps
+
+
+        self.init_qpos_box_pushing = np.array(init_qpos) #[0., 0., 0., -1.5, 0., 1.5, 0., 0., 0., 0.6, 0.45, 0.0, 1., 0., 0., 0.])
+        self.init_qvel_box_pushing = np.array(init_qvel)  #np.zeros(15)
         self.frame_skip = frame_skip
 
         self._q_max = q_max
@@ -78,7 +92,7 @@ class BoxPushingEnvBase(MujocoEnv, utils.EzPickle):
         self._steps += 1
         self._episode_energy += np.sum(np.square(action))
 
-        episode_end = True if self._steps >= MAX_EPISODE_STEPS_BOX_PUSHING else False
+        episode_end = True if self._steps >= self._max_steps else False
 
         box_pos = self.data.body("box_0").xpos.copy()
         box_quat = self.data.body("box_0").xquat.copy()
@@ -119,16 +133,29 @@ class BoxPushingEnvBase(MujocoEnv, utils.EzPickle):
         self.render_active = True
         return super().render()
 
-    def reset_model(self):
+    def reset_model(self,
+                    box_init: np.ndarray[int, 7]=np.array([0.4, 0.3, -0.01, 0.0, 0.0, 0.0, 1.0]),
+                    box_target: np.ndarray[int, 7]=None):
+        '''
+            added parameters box_init and box_target_pos for replanning mode -> can feed in box position defined in other box_pushing_env
+        Args:
+            box_init:       initial position of the box
+            box_target:     target position of the box
+
+        Returns: [joins_pos, joins_vel, current_pos_box, current_orientation_box, position_target, orientation_target]
+        '''
         # rest box to initial position
         self.set_state(self.init_qpos_box_pushing, self.init_qvel_box_pushing)
         box_init_pos = self.sample_context() if self.random_init else np.array([0.4, 0.3, -0.01, 0.0, 0.0, 0.0, 1.0])
         self.data.joint("box_joint").qpos = box_init_pos
 
         # set target position
-        box_target_pos = self.sample_context()
-        while np.linalg.norm(box_target_pos[:2] - box_init_pos[:2]) < 0.3:
+        if box_target is None:
             box_target_pos = self.sample_context()
+            while np.linalg.norm(box_target_pos[:2] - box_init_pos[:2]) < 0.3:
+                box_target_pos = self.sample_context()
+        else:
+            box_target_pos = box_target
         # box_target_pos[0] = 0.4
         # box_target_pos[1] = -0.3
         # box_target_pos[-4:] = np.array([0.0, 0.0, 0.0, 1.0])
